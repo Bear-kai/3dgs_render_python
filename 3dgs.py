@@ -203,7 +203,7 @@ class Rasterizer:
                 ]
             )
             Jacobi[2,2] /= 5                                         # 手动调整，方便可视化，渲染仅关注z的相对大小-->光栅化时深度排序
-            R_2orth.append( Jacobi @ viewmatrix[:3, :3] @ rotation ) # 由于Jacobi非正交阵，故R_2orth非旋转矩阵，即正交投影空间中，原椭球已被"变形"成非椭球了！
+            R_2orth.append( Jacobi @ viewmatrix[:3, :3] @ rotation ) # 由于Jacobi非正交阵，故R_2orth非旋转矩阵，即正交投影空间中，原椭球已被"变形"了！
             # 自增：计算投影到图像平面上2D协方差对应的旋转+轴长
             cov2D = np.array([[cov[0], cov[1]], [cov[1], cov[2]]])
             eigval, eigvec = np.linalg.eig(cov2D)
