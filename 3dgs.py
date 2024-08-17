@@ -12,11 +12,15 @@ import numpy as np
 from tqdm import tqdm
 from loguru import logger
 from math import sqrt, ceil
+import matplotlib.pyplot as plt
+import cv2
 
 from render_python import computeColorFromSH
 from render_python import computeCov2D, computeCov3D
-from render_python import transformPoint4x4, in_frustum
-from render_python import getWorld2View2, getProjectionMatrix, ndc2Pix, in_frustum
+from render_python import transformPoint4x4, in_frustum, transformPoint4x3
+from render_python import getWorld2View2, getProjectionMatrix, ndc2Pix, in_frustum, \
+                          getProjectionMatrix_games101, getProjectionMatrix_opengl
+from matplotlib_vis import vis_ellipsoid, generate_random_rotation_matrix
 
 
 class Rasterizer:
@@ -42,12 +46,12 @@ class Rasterizer:
         viewmatrix,  # matrix for view transformation
         projmatrix,  # *(4, 4), matrix for transformation, aka mvp
         cam_pos,  # position of camera
-        tan_fovx,  # float, tan value of fovx
-        tan_fovy,  # float, tan value of fovy
+        tan_fovx,  # float, tan value of fovx   --> 对应像平面在[-1,1]范围的焦距fx的倒数
+        tan_fovy,  # float, tan value of fovy   
         prefiltered,
     ) -> None:
 
-        focal_y = height / (2 * tan_fovy)  # focal of y axis
+        focal_y = height / (2 * tan_fovy)  # focal of y axis --> 这里转为像平面在[-H/2,H/2]范围的焦距
         focal_x = width / (2 * tan_fovx)
 
         # run preprocessing per-Gaussians
@@ -90,7 +94,17 @@ class Rasterizer:
             preprocessed["conic_opacity"],
             background,
         )
-        return out_color
+
+        # 以下新增返回参数
+        extra_return = dict(
+            R_2orth = preprocessed["R_2orth"],
+            angle2D = preprocessed["angle2D"],
+            axes2D_length = preprocessed["axes2D_length"],
+            xy_orth = preprocessed["xy_orth"],
+            uv_img = preprocessed["points_xy_image"]
+        )
+
+        return out_color, extra_return
 
     def preprocess(
         self,
@@ -114,12 +128,18 @@ class Rasterizer:
         tan_fovy,
     ):
 
-        rgbs = []  # rgb colors of gaussians
-        cov3Ds = []  # covariance of 3d gaussians
-        depths = []  # depth of 3d gaussians after view&proj transformation
-        radii = []  # radius of 2d gaussians
-        conic_opacity = []  # covariance inverse of 2d gaussian and opacity
+        rgbs = []             # rgb colors of gaussians
+        cov3Ds = []           # covariance of 3d gaussians
+        depths = []           # depth of 3d gaussians after view&proj transformation
+        radii = []            # radius of 2d gaussians
+        conic_opacity = []    # covariance inverse of 2d gaussian and opacity
         points_xy_image = []  # mean of 2d guassians
+
+        R_2orth = []
+        angle2D = []
+        axes2D_length = []
+        xy_orth = []
+
         for idx in range(P):
             # make sure point in frustum
             p_orig = orig_points[idx]
@@ -137,7 +157,7 @@ class Rasterizer:
             # compute 3d covarance by scaling and rotation parameters
             scale = scales[idx]
             rotation = rotations[idx]
-            cov3D = computeCov3D(scale, scale_modifier, rotation)
+            cov3D = computeCov3D(scale, scale_modifier, rotation)   # in world space
             cov3Ds.append(cov3D)
 
             # compute 2D screen-space covariance matrix
@@ -156,9 +176,9 @@ class Rasterizer:
             conic = [cov[2] * det_inv, -cov[1] * det_inv, cov[0] * det_inv]
             conic_opacity.append([conic[0], conic[1], conic[2], opacities[idx]])
 
-            # compute radius, by finding eigenvalues of 2d covariance
+            # compute radius, by finding eigenvalues of 2d covariance --> 令det(cov-lambda*eye)=0, 再用二次求根公式得出两个根即为lambda
             # transfrom point from NDC to Pixel
-            mid = 0.5 * (cov[0] + cov[1])
+            mid = 0.5 * (cov[0] + cov[2])
             lambda1 = mid + sqrt(max(0.1, mid * mid - det))
             lambda2 = mid - sqrt(max(0.1, mid * mid - det))
             my_radius = ceil(3 * sqrt(max(lambda1, lambda2)))
@@ -172,13 +192,39 @@ class Rasterizer:
             result = computeColorFromSH(D, p_orig, cam_pos, sh)
             rgbs.append(result)
 
-        return dict(
+            # 自增：计算正交投影空间下3D协方差对应的"假旋转"R_2orth，假设轴长S不变；
+            nx, ny = 2/tan_fovx, 2/tan_fovy                          # 计算像平面在[-2,2]范围的焦距
+            t = transformPoint4x3(p_orig, viewmatrix)                # world2cam
+            Jacobi = np.array(                                       # 该雅可比，对应于将cam视锥空间转换到(正负2范围的)正交投影空间的变换
+                [                                                    # 将J[2,2]改为实际偏导数 nf/(z*z)，注意3dgs.py中有设置znear=0.01,zfar=100，
+                    [nx / t[2], 0, -(nx * t[0]) / (t[2] * t[2])],    # 这里姑且认为远平面不变，即 f=zfar，再令 n=(focal_x + focal_y)/2
+                    [0, ny / t[2], -(ny * t[1]) / (t[2] * t[2])],
+                    [0, 0, 50*(nx+ny) / (t[2] * t[2])],              # [0, 0, 0],    
+                ]
+            )
+            Jacobi[2,2] /= 5                                         # 手动调整，方便可视化，渲染仅关注z的相对大小-->光栅化时深度排序
+            R_2orth.append( Jacobi @ viewmatrix[:3, :3] @ rotation ) # 由于Jacobi非正交阵，故R_2orth非旋转矩阵，即正交投影空间中，原椭球已被"变形"成非椭球了！
+            # 自增：计算投影到图像平面上2D协方差对应的旋转+轴长
+            cov2D = np.array([[cov[0], cov[1]], [cov[1], cov[2]]])
+            eigval, eigvec = np.linalg.eig(cov2D)
+            angle2D.append( np.arctan2(eigvec[1,0], eigvec[0,0]) )
+            axes2D_length.append( (int(round(np.sqrt(5.991*eigval[0]))),   
+                                   int(round(np.sqrt(5.991*eigval[1])))) )  # 绘制95%置信区间（自由度为2的卡方分布95%置信度小于5.991）
+            xy_orth.append(2*np.array([p_proj[0], p_proj[1], -1.]))         # 将椭球中心从world投影到(正负2范围的)正交投影空间，这里统一设置深度值为-2
+
+        return dict(             # 本demo中未用到cov3Ds和radii
             rgbs=rgbs,
             cov3Ds=cov3Ds,
             depths=depths,
             radii=radii,
             conic_opacity=conic_opacity,
             points_xy_image=points_xy_image,
+
+            # 以下新增返回参数
+            R_2orth = R_2orth,
+            angle2D = angle2D,
+            axes2D_length = axes2D_length,
+            xy_orth = xy_orth
         )
 
     def render(
@@ -193,12 +239,13 @@ class Rasterizer:
             for j in range(W):
                 pbar.update(1)
                 pixf = [i, j]
-                C = [0, 0, 0]
+                C = np.zeros(3)  # [0, 0, 0]
+                T = 1            # corner case: no 3D gaussian point, then get final color as bg_color directly
 
                 # loop gaussian
                 for idx in point_list:
 
-                    # init helper variables, transmirrance
+                    # init helper variables, transmirrance --> 透明度
                     T = 1
 
                     # Resample using conic matrix
@@ -212,61 +259,85 @@ class Rasterizer:
                     power = (
                         -0.5 * (con_o[0] * d[0] * d[0] + con_o[2] * d[1] * d[1])
                         - con_o[1] * d[0] * d[1]
-                    )
-                    if power > 0:
+                    )                                            # 二维高斯概率密度函数推导：https://www.cnblogs.com/kailugaji/p/15542845.html
+                    if power > 0:                                # power势必非负，这里起到assert作用
                         continue
 
                     # Eq. (2) from 3D Gaussian splatting paper.
                     # Compute color
-                    alpha = min(0.99, con_o[3] * np.exp(power))
-                    if alpha < 1 / 255:
+                    alpha = min(0.99, con_o[3] * np.exp(power))  # con_o[3]对应该高斯的opacity, exp(power)是该2D高斯对该像素的影响程度！
+                    if alpha < 1 / 255:                          # 该高斯越不透明，距离该像素越近(即影响越大)，则alpha越大，否则此像素将跳过该高斯！
                         continue
-                    test_T = T * (1 - alpha)
+                    test_T = T * (1 - alpha)                     # 更新透明度
                     if test_T < 0.0001:
                         break
 
                     # Eq. (3) from 3D Gaussian splatting paper.
                     color = features[idx]
                     for ch in range(3):
-                        C[ch] += color[ch] * alpha * T
+                        C[ch] += color[ch] * alpha * T           # 类似NeRF中的体积渲染，sum累加{"前面点的透明度 x 当前的不透明度 x 当前颜色"}
 
                     T = test_T
 
                 # get final color
-                for ch in range(3):
+                for ch in range(3):                              # 对于透明度高的地方，用背景颜色填充
                     out_color[j, i, ch] = C[ch] + T * bg_color[ch]
 
         return out_color
 
 
 if __name__ == "__main__":
+    np.random.seed(666)
+
     # set guassian
-    pts = np.array([[2, 0, -2], [0, 2, -2], [-2, 0, -2]])
+    pts = np.array([[2, 0, -2], [2, 2, -2], [-3, 0, -2]])         # nx3, in world coord  
     n = len(pts)
     shs = np.random.random((n, 16, 3))
-    opacities = np.ones((n, 1))
-    scales = np.ones((n, 3))
-    rotations = np.array([np.eye(3)] * n)
+    opacities = np.ones(n)
+    scales = np.array([[1,1.5,1],[1.5,1,1],[1,0.5,0.5]])          # 0.5*np.ones((n, 3))   #  
+    rotations = np.array([np.eye(3)] * n)                         # nx3x3
+    rotations = np.stack([generate_random_rotation_matrix(),
+                          generate_random_rotation_matrix(),
+                          generate_random_rotation_matrix(),])
 
-    # set camera
-    cam_pos = np.array([0, 0, 5])
-    R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])
+    # 新增椭球的可视化  ellipsoid in world space
+    vis_ellipsoid(radius_arr=scales, R_arr=rotations, t_arr=pts)
+    
+    # set params
+    H, W = 400, 400
     proj_param = {"znear": 0.01, "zfar": 100, "fovX": 45, "fovY": 45}
-    viewmatrix = getWorld2View2(R=R, t=cam_pos)
-    projmatrix = getProjectionMatrix(**proj_param)
-    projmatrix = np.dot(projmatrix, viewmatrix)
+    cam_pos = np.array([0, 0, 5])                               # in world
+
+    # 1. cam左手系（物体在cam的+z方向），透视投影矩阵基于左手系推导
+    # R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            # cam2world
+    # viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam
+    # # projmatrix = getProjectionMatrix(**proj_param)            # 推导假设：cam为左手系, near --> 0, far --> 1
+    # projmatrix = getProjectionMatrix_games101(**proj_param)     # 推导假设：cam为左手系, near --> 1, far --> -1
+
+    # 2. cam右手系（物体在cam的-z方向），透视投影矩阵基于右手系推导
+    # R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])             # cam2world  
+    # viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam    
+    # projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系, near --> -1, far --> 1 
+     
+    # 3. cam左手系（物体在cam的+z方向），透视投影矩阵基于右手系推导  --> 错误匹配时的成像，与正常成像"中心对称"！
+    R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            
+    viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam
+    projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系, near --> -1, far --> 1 
+
+    # compute mvp transformation   
+    projmatrix = np.dot(projmatrix, viewmatrix)                 # mvp, world2NDC 
     tanfovx = math.tan(proj_param["fovX"] * 0.5)
     tanfovy = math.tan(proj_param["fovY"] * 0.5)
 
     # render
     rasterizer = Rasterizer()
-    out_color = rasterizer.forward(
+    out_color, extra_return = rasterizer.forward(
         P=len(pts),
         D=3,
         M=16,
         background=np.array([0, 0, 0]),
-        width=700,
-        height=700,
+        width=W,
+        height=H,
         means3D=pts,
         shs=shs,
         colors_precomp=None,
@@ -283,7 +354,19 @@ if __name__ == "__main__":
         prefiltered=None,
     )
 
-    import matplotlib.pyplot as plt
+    # plt.imshow(out_color)
+    # plt.show()
 
-    plt.imshow(out_color)
-    plt.show()
+    # 新增椭球和椭圆的可视化
+    vis_ellipsoid(radius_arr=scales, 
+                  R_arr=extra_return["R_2orth"], 
+                  t_arr=extra_return["xy_orth"])  # ellipsoid in 对应图像尺寸的正交投影空间
+    for uv, ax_length, ax_angle in zip(extra_return["uv_img"], 
+                                       extra_return["axes2D_length"], 
+                                       extra_return["angle2D"]):
+        uv_int = (int(uv[0]),int(uv[1]))
+        out_color = cv2.ellipse(out_color, uv_int, ax_length, 180*ax_angle/np.pi, 0, 360, (255,0,0), 2) 
+
+
+    cv2.imshow("screen", np.flipud(out_color))    # flipud将OpenGL风格的图像坐标系，转为OpenCV风格
+    cv2.waitKey(0)

@@ -33,15 +33,16 @@
 
 import numpy as np
 
-
-SH_C0 = 0.28209479177387814
-SH_C1 = 0.4886025119029199
+#【存疑】 这个正负号是如何确定的，为何wiki的表格中没有负号？！
+# https://zh.wikipedia.org/wiki/%E7%90%83%E8%B0%90%E5%87%BD%E6%95%B0
+SH_C0 = 0.28209479177387814     # math.sqrt((1/4/math.pi))
+SH_C1 = 0.4886025119029199      # math.sqrt((3/4/math.pi)), m=-1,0,1分别对应-,+,-
 SH_C2 = [
-    1.0925484305920792,
-    -1.0925484305920792,
-    0.31539156525252005,
-    -1.0925484305920792,
-    0.5462742152960396,
+    1.0925484305920792,         # m=-2,  math.sqrt((15/math.pi))/2
+    -1.0925484305920792,        # m=-1, -math.sqrt((15/math.pi))/2
+    0.31539156525252005,        # m=0,   math.sqrt((5/math.pi))/4
+    -1.0925484305920792,        # m=1,  -math.sqrt((15/math.pi))/2
+    0.5462742152960396,         # m=2,   math.sqrt((15/math.pi))/4
 ]
 SH_C3 = [
     -0.5900435899266435,
@@ -58,9 +59,11 @@ def computeColorFromSH(deg, pos, campos, sh):
     # The implementation is loosely based on code for
     # "Differentiable Point-Based Radiance Fields for
     # Efficient View Synthesis" by Zhang et al. (2022)
+    # [ref1]: https://github.com/sjtuzq/point-radiance/tree/main/modules/sh.py
+    # [ref2]: https://github.com/graphdeco-inria/diff-gaussian-rasterization/blob/59f5f77e3ddbac3ed9db93ec2cfe99ed6c5d121d/cuda_rasterizer/forward.cu
 
-    dir = pos - campos
-    dir = dir / np.linalg.norm(dir)
+    dir = pos - campos                  # in world
+    dir = dir / np.linalg.norm(dir)     # 归一化方向，使颜色跟观察方向相关！
 
     result = SH_C0 * sh[0]
 
@@ -95,8 +98,8 @@ def computeColorFromSH(deg, pos, campos, sh):
                     + SH_C3[5] * z * (xx - yy) * sh[14]
                     + SH_C3[6] * x * (xx - 3.0 * yy) * sh[15]
                 )
-    result += 0.5
-    return np.clip(result, a_min=0, a_max=1)
+    result += 0.5                               # 原出处[ref1]没有+0.5，3DGS[ref2]中加了！
+    return np.clip(result, a_min=0, a_max=1)    # 颜色值确保在[0,1]区间！
 
 
 if __name__ == "__main__":
@@ -104,4 +107,5 @@ if __name__ == "__main__":
     pos = np.array([2, 0, -2])
     campos = np.array([0, 0, 5])
     sh = np.random.random((16, 3))
-    computeColorFromSH(deg, pos, campos, sh)
+    color = computeColorFromSH(deg, pos, campos, sh)
+    print(color)
