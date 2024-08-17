@@ -12,6 +12,8 @@ Base on the original repo, we do the following:
     |---|---|
     |<img src="assets\ellipsoid.png" width = 300 height = 200>| <img src="assets\3dgs_with_ellipse.png" width = 200 height = 200>|
 
+- Still confuse about the sign of spherical harmonics cofficients [sh](https://github.com/Bear-kai/3dgs_render_python/blob/69994b2fce05c45fa147d589bc3ff8d875f905e4/render_python/sh.py#L36).
+
 ---
 
 # 🌟 3dgs_render_python
