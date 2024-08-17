@@ -309,10 +309,10 @@ if __name__ == "__main__":
     cam_pos = np.array([0, 0, 5])                               # in world
 
     # 1. cam左手系（物体在cam的+z方向），透视投影矩阵基于左手系推导
-    # R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            # cam2world
-    # viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam
-    # # projmatrix = getProjectionMatrix(**proj_param)            # 推导假设：cam为左手系, near --> 0, far --> 1
-    # projmatrix = getProjectionMatrix_games101(**proj_param)     # 推导假设：cam为左手系, near --> 1, far --> -1
+    R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            # cam2world
+    viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam
+    # projmatrix = getProjectionMatrix(**proj_param)            # 推导假设：cam为左手系, near --> 0, far --> 1
+    projmatrix = getProjectionMatrix_games101(**proj_param)     # 推导假设：cam为左手系, near --> 1, far --> -1
 
     # 2. cam右手系（物体在cam的-z方向），透视投影矩阵基于右手系推导
     # R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])             # cam2world  
@@ -320,9 +320,9 @@ if __name__ == "__main__":
     # projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系, near --> -1, far --> 1 
      
     # 3. cam左手系（物体在cam的+z方向），透视投影矩阵基于右手系推导  --> 错误匹配时的成像，与正常成像"中心对称"！
-    R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            
-    viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam
-    projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系, near --> -1, far --> 1 
+    # R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            
+    # viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam
+    # projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系, near --> -1, far --> 1 
 
     # compute mvp transformation   
     projmatrix = np.dot(projmatrix, viewmatrix)                 # mvp, world2NDC 

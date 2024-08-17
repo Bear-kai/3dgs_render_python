@@ -1,3 +1,19 @@
+Base on the original repo, we do the following:
+
+- Add more detailed comments such as the explanation of [Jacobi](https://github.com/Bear-kai/3dgs_render_python/blob/17af6981f6f3dd118e6d5ee95507194698b69cce/render_python/raster.py#L88).
+
+- Fix bugs or typos such as computing [axis_length](https://github.com/Bear-kai/3dgs_render_python/blob/17af6981f6f3dd118e6d5ee95507194698b69cce/3dgs.py#L181).
+
+- Add tests about different styles of perspective projection matrix and related right/left hand coordinate system.
+
+- Add visualization of ellipsoids/ellipses with random rotations by using matplotlib (also vpython).
+
+    | ellipsoids | ellipses |
+    |---|---|
+    |<img src="assets\ellipsoid.png" width = 300 height = 200>| <img src="assets\3dgs_with_ellipse.png" width = 200 height = 200>|
+
+---
+
 # 🌟 3dgs_render_python
 
 English | [中文](assets/README_ch.md)
