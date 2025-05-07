@@ -81,7 +81,7 @@ class Rasterizer:
         # produce [depth] key and corresponding guassian indices
         # sort indices by depth
         depths = preprocessed["depths"]
-        point_list = np.argsort(depths)
+        point_list = np.argsort(depths)     # 从小到大排序，返回索引
 
         # render
         logger.info("Starting render...")
@@ -164,7 +164,7 @@ class Rasterizer:
             # based on splatting, -> JW Sigma W^T J^T
             cov = computeCov2D(
                 p_orig, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix
-            )
+            )  # 此处的cov是cov矩阵的三个元素：[cov[0, 0], cov[0, 1], cov[1, 1]]
 
             # invert covarance(EWA splatting)
             det = cov[0] * cov[2] - cov[1] * cov[1]
@@ -173,11 +173,12 @@ class Rasterizer:
                 cov3Ds.pop()
                 continue
             det_inv = 1 / det
-            conic = [cov[2] * det_inv, -cov[1] * det_inv, cov[0] * det_inv]
+            conic = [cov[2] * det_inv, -cov[1] * det_inv, cov[0] * det_inv]  # 取协方差的逆矩阵的[0,0],[0,1]和[1,1]处的元素
             conic_opacity.append([conic[0], conic[1], conic[2], opacities[idx]])
 
-            # compute radius, by finding eigenvalues of 2d covariance --> 令det(cov-lambda*eye)=0, 再用二次求根公式得出两个根即为lambda
+            # compute radius, by finding eigenvalues of 2d covariance
             # transfrom point from NDC to Pixel
+            # --> 令det(cov-lambda*eye)=0, 再用二次求根公式得出两个根即为lambda，等于下面自增的特征分解的eigval
             mid = 0.5 * (cov[0] + cov[2])
             lambda1 = mid + sqrt(max(0.1, mid * mid - det))
             lambda2 = mid - sqrt(max(0.1, mid * mid - det))
@@ -197,7 +198,7 @@ class Rasterizer:
             t = transformPoint4x3(p_orig, viewmatrix)                # world2cam
             Jacobi = np.array(                                       # 该雅可比，对应于将cam视锥空间转换到(正负2范围的)正交投影空间的变换
                 [                                                    # 将J[2,2]改为实际偏导数 nf/(z*z)，注意3dgs.py中有设置znear=0.01,zfar=100，
-                    [nx / t[2], 0, -(nx * t[0]) / (t[2] * t[2])],    # 这里姑且认为远平面不变，即 f=zfar，再令 n=(focal_x + focal_y)/2
+                    [nx / t[2], 0, -(nx * t[0]) / (t[2] * t[2])],    # 这里姑且认为远平面不变，即 f=zfar=100，再令 n=(nx+ny)/2
                     [0, ny / t[2], -(ny * t[1]) / (t[2] * t[2])],
                     [0, 0, 50*(nx+ny) / (t[2] * t[2])],              # [0, 0, 0],    
                 ]
@@ -260,7 +261,7 @@ class Rasterizer:
                         -0.5 * (con_o[0] * d[0] * d[0] + con_o[2] * d[1] * d[1])
                         - con_o[1] * d[0] * d[1]
                     )                                            # 二维高斯概率密度函数推导：https://www.cnblogs.com/kailugaji/p/15542845.html
-                    if power > 0:                                # power势必非负，这里起到assert作用
+                    if power > 0:                                # power势必小于等于0，这里起到assert作用
                         continue
 
                     # Eq. (2) from 3D Gaussian splatting paper.
@@ -280,7 +281,7 @@ class Rasterizer:
                     T = test_T
 
                 # get final color
-                for ch in range(3):                              # 对于透明度高的地方，用背景颜色填充
+                for ch in range(3):                              # “剩下的”透明度，用背景颜色填充
                     out_color[j, i, ch] = C[ch] + T * bg_color[ch]
 
         return out_color
@@ -300,7 +301,7 @@ if __name__ == "__main__":
                           generate_random_rotation_matrix(),
                           generate_random_rotation_matrix(),])
 
-    # 新增椭球的可视化  ellipsoid in world space
+    # 新增椭球的可视化：ellipsoid in world space
     vis_ellipsoid(radius_arr=scales, R_arr=rotations, t_arr=pts)
     
     # set params
@@ -311,13 +312,13 @@ if __name__ == "__main__":
     # 1. cam左手系（物体在cam的+z方向），透视投影矩阵基于左手系推导
     R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            # cam2world
     viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam
-    # projmatrix = getProjectionMatrix(**proj_param)            # 推导假设：cam为左手系, near --> 0, far --> 1
-    projmatrix = getProjectionMatrix_games101(**proj_param)     # 推导假设：cam为左手系, near --> 1, far --> -1
+    # projmatrix = getProjectionMatrix(**proj_param)            # 推导假设：cam为左手系（NDC为左手系）, near --> 0, far --> 1
+    projmatrix = getProjectionMatrix_games101(**proj_param)     # 推导假设：cam为左手系（NDC为右手系）, near --> 1, far --> -1
 
     # 2. cam右手系（物体在cam的-z方向），透视投影矩阵基于右手系推导
     # R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, 1]])             # cam2world  
     # viewmatrix = getWorld2View2(R=R, t=cam_pos)                 # world2cam    
-    # projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系, near --> -1, far --> 1 
+    # projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系（NDC为左手系）, near --> -1, far --> 1 
      
     # 3. cam左手系（物体在cam的+z方向），透视投影矩阵基于右手系推导  --> 错误匹配时的成像，与正常成像"中心对称"！
     # R = np.array([[1, 0, 0], [0, 1, 0], [0, 0, -1]])            
@@ -325,7 +326,7 @@ if __name__ == "__main__":
     # projmatrix = getProjectionMatrix_opengl(**proj_param)       # 推导假设：cam为右手系, near --> -1, far --> 1 
 
     # compute mvp transformation   
-    projmatrix = np.dot(projmatrix, viewmatrix)                 # mvp, world2NDC 
+    projmatrix = np.dot(projmatrix, viewmatrix)                 # mvp：world2NDC 
     tanfovx = math.tan(proj_param["fovX"] * 0.5)
     tanfovy = math.tan(proj_param["fovY"] * 0.5)
 
@@ -354,13 +355,13 @@ if __name__ == "__main__":
         prefiltered=None,
     )
 
-    # plt.imshow(out_color)
+    # plt.imshow(out_color)  # 注意与下面cv2显示是颠倒关系
     # plt.show()
 
-    # 新增椭球和椭圆的可视化
-    vis_ellipsoid(radius_arr=scales, 
-                  R_arr=extra_return["R_2orth"], 
-                  t_arr=extra_return["xy_orth"])  # ellipsoid in 对应图像尺寸的正交投影空间
+    # 新增椭球和椭圆的可视化：ellipsoid in "fake" orthogonal space
+    # vis_ellipsoid(radius_arr=scales, 
+    #               R_arr=extra_return["R_2orth"],  # 将椭球从world转到cam，继而通过雅可比J转到"伪"正交投影空间
+    #               t_arr=extra_return["xy_orth"])  # ellipsoid in 对应图像尺寸的正交投影空间
     for uv, ax_length, ax_angle in zip(extra_return["uv_img"], 
                                        extra_return["axes2D_length"], 
                                        extra_return["angle2D"]):

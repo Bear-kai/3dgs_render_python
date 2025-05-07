@@ -30,7 +30,7 @@ def get_model_matrix(angle):
     )
 
 
-# from world to camera --> eye_pose是cam在world下的坐标，所以平移量需要添加负号，才对应world2cam的变换！
+# from world to camera --> eye_pose是cam在world下的坐标，所以平移量需要添加负号，才对应world2cam的变换！这里cam和world坐标系都是右手系，朝向一致，仅z轴有平移!
 def get_view_matrix(eye_pose):
     return np.array(
         [

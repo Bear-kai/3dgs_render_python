@@ -25,6 +25,8 @@ def get_ellipsoid(radius, R = np.eye(3), t = np.zeros((3,1))):
     theta =  np.linspace(0, np.pi, npts)
     phi, theta = np.meshgrid(phi, theta)
 
+    # 椭球标准方程：x^2/a^2 + y^2/b^2 + z^2/c^2 = 1，其中a,b,c分别是x,y,z的半轴长度，
+    # 也即rx,ry,rz，可知下面x,y,z满足椭球方程！当rx=ry=rz时，下面就是球的极坐标表达！
     x = rx * np.sin(theta) * np.cos(phi)
     y = ry * np.sin(theta) * np.sin(phi)
     z = rz * np.cos(theta)
@@ -77,69 +79,3 @@ def example():
 if __name__ == '__main__':
 
     example()
-    sys.exit(0)
-
-    # old --> to delete
-    # 绘制椭球面
-    fig = plt.figure(figsize=(6, 6))
-    ax = fig.add_subplot(111, projection='3d')
-    ax.set(xlim=(-6,6), ylim=(-6,6), zlim=(-6,6), aspect="equal",
-        xlabel='X', ylabel='Y', zlabel='Z')
-    
-    radius = (1.5, 1.0, 0.5)
-    R = generate_random_rotation_matrix()
-    t = np.array([2, 0, -2]).reshape(-1,1)
-    x1, y1, z1 = get_ellipsoid(radius, R=R, t=t)
-
-    radius = (0.5, 1.0, 0.5)
-    R = generate_random_rotation_matrix()
-    t = np.array([2, 2, -2]).reshape(-1,1)
-    x2, y2, z2 = get_ellipsoid(radius, R=R, t=t)
-
-    radius = (0.5, 1.0, 1.5)
-    R = generate_random_rotation_matrix()
-    t = np.array([-3, 0, -2]).reshape(-1,1)
-    x3, y3, z3 = get_ellipsoid(radius, R=R, t=t)
-
-    # 计算颜色值，这里使用 u 和 v 的正弦和余弦函数来创建渐变效果
-    color_values = (np.sin(x1) * np.cos(y1) + 1.0)/2.0
-    # 为颜色值创建一个颜色映射
-    color_map = plt.cm.coolwarm  # plt.cm.get_cmap('viridis')  # 
-    colors = color_map(color_values / np.max(color_values))
-
-    ax.plot_surface(x1, y1, z1, rstride=5, cstride=5, facecolors=colors,                 # edgecolors='k',  # , color='c'
-                    linewidth=0.5, antialiased=True, alpha=0.8)     # cmap=plt.cm.viridis , plt.cm.coolwarm
-    ax.plot_surface(x2, y2, z2, rstride=5, cstride=5,                  # edgecolors='k',  # , color='c'
-                    linewidth=0.5, antialiased=True, alpha=0.8)     # cmap=plt.cm.viridis , plt.cm.coolwarm
-    ax.plot_surface(x3, y3, z3, rstride=5, cstride=5,                  # edgecolors='k',  # , color='c'
-                    linewidth=0.5, antialiased=True, alpha=0.8)     # cmap=plt.cm.viridis , plt.cm.coolwarm
-
-    # 添加颜色条
-    # sm = plt.cm.ScalarMappable(cmap=color_map, norm=plt.Normalize(-1, 1))
-    # sm.set_array([])
-    # plt.colorbar(sm, ax=ax, orientation='vertical')
-
-    # Plot projections of the contours for each dimension.  By choosing offsets
-    # that match the appropriate axes limits, the projected contours will sit on
-    # the 'walls' of the graph
-    ax.contourf(x1, y1, z1, zdir='z', offset=-6, cmap='coolwarm')
-    ax.contourf(x1, y1, z1, zdir='x', offset=-6, cmap='coolwarm')
-    ax.contourf(x1, y1, z1, zdir='y', offset=6, cmap='coolwarm')
-
-    ax.contourf(x2, y2, z2, zdir='z', offset=-6, cmap='coolwarm')
-    ax.contourf(x2, y2, z2, zdir='x', offset=-6, cmap='coolwarm')
-    ax.contourf(x2, y2, z2, zdir='y', offset=6, cmap='coolwarm')
-
-    ax.contourf(x3, y3, z3, zdir='z', offset=-6, cmap='coolwarm')
-    ax.contourf(x3, y3, z3, zdir='x', offset=-6, cmap='coolwarm')
-    ax.contourf(x3, y3, z3, zdir='y', offset=6, cmap='coolwarm')
-    # or绘制网格线
-    # ax.plot_wireframe(x, y, z, rstride=10, cstride=10, color='k', alpha=0.3)
-
-    # 设置坐标轴标签
-    # ax.set_xlabel('X')
-    # 设置图形标题
-    plt.title('Ellipsoid')
-
-    # 显示图形
-    plt.show()

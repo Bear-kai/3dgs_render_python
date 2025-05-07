@@ -19,7 +19,7 @@ ellipsoid_width  = [1,2,3]
 ellipsoid_opacity = [0.8, 0.6, 0.4]
 
 for pos,x,y,z,opa in zip(ellipsoid_pos,ellipsoid_length, 
-                        ellipsoid_length, ellipsoid_width, ellipsoid_opacity):
+                        ellipsoid_height, ellipsoid_width, ellipsoid_opacity):
     # 创建椭球体对象
     e = ellipsoid(pos=pos, length=x, height=y, width=z)  # , color=color.cyan
     # 设置椭球体的透明度，1.0表示完全不透明，0.0表示完全透明

@@ -12,6 +12,8 @@ from .graphic import getProjectionMatrix
 
 
 def ndc2Pix(v, S):
+    # 2025/05/07：注意3dgs.py中不管用的是哪个版本的mvp投影矩阵，x,y均映射
+    # 到[-1,1]范围，返回的像素坐标是opengl风格，即左下角为图像原点且x右y上！
     return ((v + 1.0) * S - 1.0) * 0.5
 
 
@@ -39,9 +41,9 @@ def transformPoint4x4(p, matrix):
 
 
 def transformPoint4x3(p, matrix):
-    matrix = np.array(matrix).flatten(order="F")
+    matrix = np.array(matrix).flatten(order="F")    # 按列拉直
     x, y, z = p
-    transformed = np.array(
+    transformed = np.array(                         # 这里按c++风格将矩阵乘法手动展开了
         [
             matrix[0] * x + matrix[4] * y + matrix[8] * z + matrix[12],
             matrix[1] * x + matrix[5] * y + matrix[9] * z + matrix[13],
@@ -63,7 +65,7 @@ def computeCov3D(scale, mod, rot):
     R = rot
 
     # compute 3d world covariance matrix Sigma
-    M = np.dot(R, S)
+    M = np.dot(R, S)        # 注意这里是R@S，相当于对R的列向量进行缩放！M@point才能实现缩放+旋转！
     cov3D = np.dot(M, M.T)
 
     return cov3D
@@ -85,27 +87,29 @@ def computeCov2D(mean, focal_x, focal_y, tan_fovx, tan_fovy, cov3D, viewmatrix):
     t[0] = min(limx, max(-limx, txtz)) * t[2]
     t[1] = min(limy, max(-limy, tytz)) * t[2]
 
-    #【重点】雅可比矩阵J中，将near置为focal，注意该near不是3dgs.py中设置的那个znear，而是对应于
-    # HxW图像平面的焦距！这样才是把3Dcov从cam的视锥空间，转到跟图像大小一致的正交投影空间！转换后
-    # 的协方差，取前两行两列，就直接是图像平面的协方差！
-    # (对比：znear对应的那个正交投影空间，无所谓大小，因为会继续被转到NDC空间，最后视口变换还原)
-    J = np.array(                           # 对应games101风格的透视投影矩阵（n,f为正数时cam为左手系）
+    # 参考games101讲的透视正交变换矩阵M_persp2ortho，投影后的点p'对投影前的点求导，即为雅可比矩阵J！
+    # M_persp2ortho = [[n, 0, 0, 0]; [0, n, 0, 0]; [0, 0, n+f, -nf]; [0, 0, 1, 0]];
+    # p' = M_persp2ortho @ [x;y;z;1] = [nx/z; ny/z; (n+f)-nf/z; 1];
+    # 注意此处的n,f是对应于HxW图像平面的焦距，这样才能把3Dcov从cam的视锥空间，“捏”到跟图像大小一致的
+    # 正交投影空间！转换后的协方差，取前两行两列，就直接是图像平面的协方差！
+    # 而games101的n,f对应的那个正交投影空间，无所谓大小，因为会继续被转到NDC空间，最后视口变换还原。
+    J = np.array(                           
         [
             [focal_x / t[2], 0, -(focal_x * t[0]) / (t[2] * t[2])],
             [0, focal_y / t[2], -(focal_y * t[1]) / (t[2] * t[2])],
             [0, 0, 0],
         ]
     )
-    # J[:2] = -J[:2]                        # 自增：对于OpenGL风格的透视投影矩阵（cam为右手系），这里雅可比J要反号 --> 但不影响协方差结果！
+    # J[:2] = -J[:2]               # 自增：对于OpenGL风格的透视投影矩阵（cam为右手系），这里雅可比J要反号 --> 但不影响协方差结果！
     
-    W = viewmatrix[:3, :3]                  # W将cov3D从world转到cam的视锥空间，继而用J将其转到cam的正交投影的视窗！
-    T = np.dot(J, W)                        # cov3D的前2行2列，就是图像平面的cov2D协方差的样子！
+    W = viewmatrix[:3, :3]         # W将cov3D从world转到cam的视锥空间，继而用J将其转到cam的正交投影的视窗！
+    T = np.dot(J, W)               # cov3D的前2行2列，就是图像平面的cov2D协方差的样子！
 
     cov = np.dot(T, cov3D)      
     cov = np.dot(cov, T.T)
 
     # Apply low-pass filter
-    # Every Gaussia should be at least one pixel wide/high
+    # Every Gaussia should be at least one pixel wide/high  ==> 存疑：有待加深理解...
     # Discard 3rd row and column
     cov[0, 0] += 0.3
     cov[1, 1] += 0.3
